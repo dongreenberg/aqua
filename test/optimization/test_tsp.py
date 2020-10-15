@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This code is part of Qiskit.
 #
 # (C) Copyright IBM 2020.
@@ -14,12 +12,13 @@
 
 """ Test TSP (Traveling Salesman Problem) """
 
+import unittest
 from test.optimization import QiskitOptimizationTestCase
 import numpy as np
 
 from qiskit.aqua import aqua_globals
-from qiskit.optimization.ising import tsp
-from qiskit.optimization.ising.common import sample_most_likely
+from qiskit.optimization.applications.ising import tsp
+from qiskit.optimization.applications.ising.common import sample_most_likely
 from qiskit.aqua.algorithms import NumPyMinimumEigensolver
 
 
@@ -39,5 +38,18 @@ class TestTSP(QiskitOptimizationTestCase):
         algo = NumPyMinimumEigensolver(self.qubit_op)
         result = algo.run()
         x = sample_most_likely(result.eigenstate)
+        # print(self.qubit_op.to_opflow().eval(result.eigenstate).adjoint().eval(result.eigenstate))
         order = tsp.get_tsp_solution(x)
-        np.testing.assert_array_equal(order, [1, 2, 0])
+        np.testing.assert_equal(tsp.tsp_value(order, self.ins.w),
+                                tsp.tsp_value([1, 2, 0], self.ins.w))
+
+    def test_tsp_get_solution(self):
+        """ Test tsp.get_tsp_solution()"""
+        feasible = [1, 0, 0, 0, 1, 0, 0, 0, 1]
+        self.assertListEqual(tsp.get_tsp_solution(feasible), [0, 1, 2])
+        infeasible = [1, 0, 0, 1, 1, 0, 0, 0, 0]
+        self.assertListEqual(tsp.get_tsp_solution(infeasible), [[0, 1], 1, []])
+
+
+if __name__ == '__main__':
+    unittest.main()

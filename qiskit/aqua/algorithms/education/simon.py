@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This code is part of Qiskit.
 #
 # (C) Copyright IBM 2018, 2020.
@@ -16,11 +14,14 @@ Simon's algorithm.
 """
 
 import operator  # pylint: disable=unused-import
+from typing import Optional, Union, Dict, Any
 import numpy as np
 from sympy import Matrix, mod_inverse
 
 from qiskit import ClassicalRegister, QuantumCircuit
-
+from qiskit.providers import BaseBackend
+from qiskit.providers import Backend
+from qiskit.aqua import QuantumInstance
 from qiskit.aqua.algorithms import QuantumAlgorithm
 from qiskit.aqua.utils import get_subsystem_density_matrix
 from qiskit.aqua.components.oracles import Oracle
@@ -42,16 +43,20 @@ class Simon(QuantumAlgorithm):
     to create one that can be used with the Simon algorithm.
     """
 
-    def __init__(self, oracle: Oracle) -> None:
+    def __init__(self,
+                 oracle: Oracle,
+                 quantum_instance: Optional[
+                     Union[QuantumInstance, BaseBackend, Backend]] = None) -> None:
         """
         Args:
             oracle: The oracle component
+            quantum_instance: Quantum Instance or Backend
         """
-        super().__init__()
+        super().__init__(quantum_instance)
 
         self._oracle = oracle
         self._circuit = None
-        self._ret = {}
+        self._ret = {}  # type: Dict[str, Any]
 
     def construct_circuit(self, measurement=False):
         """

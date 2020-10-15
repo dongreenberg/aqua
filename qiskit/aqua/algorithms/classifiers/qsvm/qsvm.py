@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This code is part of Qiskit.
 #
 # (C) Copyright IBM 2018, 2020.
@@ -12,9 +10,10 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-"""Quantum SVM algorithm."""
+"""The Quantum SVM algorithm."""
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
+import warnings
 import logging
 import sys
 
@@ -23,13 +22,14 @@ from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister
 from qiskit.tools import parallel_map
 from qiskit.tools.events import TextProgressBar
 from qiskit.circuit import ParameterVector
-
-from qiskit.aqua import aqua_globals
+from qiskit.providers import BaseBackend
+from qiskit.providers import Backend
+from qiskit.aqua import QuantumInstance, aqua_globals
 from qiskit.aqua.algorithms import QuantumAlgorithm
 from qiskit.aqua import AquaError
 from qiskit.aqua.utils.dataset_helper import get_num_classes
 from qiskit.aqua.utils import split_dataset_to_data_and_labels
-from qiskit.aqua.components.feature_maps import FeatureMap
+from qiskit.aqua.components.feature_maps import FeatureMap, RawFeatureVector
 from qiskit.aqua.components.multiclass_extensions import MulticlassExtension
 from ._qsvm_estimator import _QSVM_Estimator
 from ._qsvm_binary import _QSVM_Binary
@@ -41,8 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 class QSVM(QuantumAlgorithm):
-    """
-    Quantum SVM algorithm.
+    """Quantum SVM algorithm.
 
     A key concept in classification methods is that of a kernel. Data cannot typically be
     separated by a hyperplane in its original space. A common technique used to find such a
@@ -76,11 +75,13 @@ class QSVM(QuantumAlgorithm):
 
     BATCH_SIZE = 1000
 
-    def __init__(self, feature_map: FeatureMap,
+    def __init__(self, feature_map: Union[QuantumCircuit, FeatureMap],
                  training_dataset: Optional[Dict[str, np.ndarray]] = None,
                  test_dataset: Optional[Dict[str, np.ndarray]] = None,
                  datapoints: Optional[np.ndarray] = None,
-                 multiclass_extension: Optional[MulticlassExtension] = None) -> None:
+                 multiclass_extension: Optional[MulticlassExtension] = None,
+                 quantum_instance: Optional[
+                     Union[QuantumInstance, BaseBackend, Backend]] = None) -> None:
         """
         Args:
             feature_map: Feature map module, used to transform data
@@ -89,11 +90,12 @@ class QSVM(QuantumAlgorithm):
             datapoints: Prediction dataset.
             multiclass_extension: If number of classes is greater than 2 then a multiclass scheme
                 must be supplied, in the form of a multiclass extension.
+            quantum_instance: Quantum Instance or Backend
 
         Raises:
             AquaError: Multiclass extension not supplied when number of classes > 2
         """
-        super().__init__()
+        super().__init__(quantum_instance)
         # check the validity of provided arguments if possible
         if training_dataset is not None:
             is_multiclass = get_num_classes(training_dataset) > 2
@@ -120,6 +122,27 @@ class QSVM(QuantumAlgorithm):
         self.feature_map = feature_map
         self.num_qubits = self.feature_map.num_qubits
 
+        if isinstance(feature_map, QuantumCircuit):
+            # patch the feature dimension attribute to the circuit
+            self.feature_map.feature_dimension = len(feature_map.parameters)
+            if not hasattr(feature_map, 'ordered_parameters'):
+                self.feature_map.ordered_parameters = sorted(feature_map.parameters,
+                                                             key=lambda p: p.name)
+            self.feature_map_params_x = ParameterVector('x', self.feature_map.feature_dimension)
+            self.feature_map_params_y = ParameterVector('y', self.feature_map.feature_dimension)
+        else:
+            if not isinstance(feature_map, RawFeatureVector):
+                warnings.warn("""
+                The {} object as input for the QSVM is deprecated as of 0.7.0 and will
+                be removed no earlier than 3 months after the release.
+                You should pass a QuantumCircuit object instead.
+                See also qiskit.circuit.library.data_preparation for a collection
+                of suitable circuits.""".format(type(feature_map)),
+                              DeprecationWarning, stacklevel=2)
+            self.feature_map_params_x = ParameterVector('x', feature_map.feature_dimension)
+            self.feature_map_params_y = ParameterVector('y', feature_map.feature_dimension)
+
+        qsvm_instance = None  # type: Optional[Union[_QSVM_Binary, _QSVM_Multiclass]]
         if multiclass_extension is None:
             qsvm_instance = _QSVM_Binary(self)
         else:
@@ -130,8 +153,7 @@ class QSVM(QuantumAlgorithm):
 
     @staticmethod
     def _construct_circuit(x, feature_map, measurement, is_statevector_sim=False):
-        """
-        If `is_statevector_sim` is True, we only build the circuits for Psi(x1)|0> rather than
+        """If `is_statevector_sim` is True, we only build the circuits for Psi(x1)|0> rather than
         Psi(x2)^dagger Psi(x1)|0>.
         """
         x1, x2 = x
@@ -143,9 +165,20 @@ class QSVM(QuantumAlgorithm):
         qc = QuantumCircuit(q, c)
 
         # write input state from sample distribution
-        qc += feature_map.construct_circuit(x1, q)
+        if isinstance(feature_map, FeatureMap):
+            qc += feature_map.construct_circuit(x1, q)
+        else:
+            psi_x1 = _assign_parameters(feature_map, x1)
+            qc.append(psi_x1.to_instruction(), qc.qubits)
+
         if not is_statevector_sim:
-            qc += feature_map.construct_circuit(x2, q).inverse()
+            # write input state from sample distribution
+            if isinstance(feature_map, FeatureMap):
+                qc += feature_map.construct_circuit(x2, q).inverse()
+            else:
+                psi_x2_dag = _assign_parameters(feature_map, x2)
+                qc.append(psi_x2_dag.to_instruction().inverse(), qc.qubits)
+
             if measurement:
                 qc.barrier(q)
                 qc.measure(q, c)
@@ -182,7 +215,7 @@ class QSVM(QuantumAlgorithm):
         return QSVM._construct_circuit((x1, x2), self.feature_map, measurement)
 
     @staticmethod
-    def get_kernel_matrix(quantum_instance, feature_map, x1_vec, x2_vec=None):
+    def get_kernel_matrix(quantum_instance, feature_map, x1_vec, x2_vec=None, enforce_psd=True):
         """
         Construct kernel matrix, if x2_vec is None, self-innerproduct is conducted.
 
@@ -201,11 +234,17 @@ class QSVM(QuantumAlgorithm):
                                     D is the feature dimension
             x2_vec (numpy.ndarray): data points, 2-D array, N2xD, where N2 is the number of data,
                                     D is the feature dimension
+            enforce_psd (bool): enforces that the kernel matrix is positive semi-definite by setting
+                                negative eigenvalues to zero. This is only applied in the symmetric
+                                case, i.e., if `x2_vec == None`.
         Returns:
             numpy.ndarray: 2-D matrix, N1xN2
         """
 
-        use_parameterized_circuits = feature_map.support_parameterized_circuit
+        if isinstance(feature_map, QuantumCircuit):
+            use_parameterized_circuits = True
+        else:
+            use_parameterized_circuits = feature_map.support_parameterized_circuit
 
         if x2_vec is None:
             is_symmetric = True
@@ -241,7 +280,7 @@ class QSVM(QuantumAlgorithm):
                     (feature_map_params, feature_map_params), feature_map, measurement,
                     is_statevector_sim=is_statevector_sim)
                 parameterized_circuit = quantum_instance.transpile(parameterized_circuit)[0]
-                circuits = [parameterized_circuit.bind_parameters({feature_map_params: x})
+                circuits = [parameterized_circuit.assign_parameters({feature_map_params: x})
                             for x in to_be_computed_data]
             else:
                 #  the second x is redundant
@@ -293,8 +332,8 @@ class QSVM(QuantumAlgorithm):
                         (feature_map_params_x, feature_map_params_y), feature_map, measurement,
                         is_statevector_sim=is_statevector_sim)
                     parameterized_circuit = quantum_instance.transpile(parameterized_circuit)[0]
-                    circuits = [parameterized_circuit.bind_parameters({feature_map_params_x: x,
-                                                                       feature_map_params_y: y})
+                    circuits = [parameterized_circuit.assign_parameters({feature_map_params_x: x,
+                                                                         feature_map_params_y: y})
                                 for x, y in to_be_computed_data_pair]
                 else:
                     if logger.isEnabledFor(logging.DEBUG):
@@ -320,6 +359,14 @@ class QSVM(QuantumAlgorithm):
                     mat[i, j] = value
                     if is_symmetric:
                         mat[j, i] = mat[i, j]
+
+        if enforce_psd and is_symmetric and not is_statevector_sim:
+            # Find the closest positive semi-definite approximation to kernel matrix, in case it is
+            # symmetric. The (symmetric) matrix should always be positive semi-definite by
+            # construction, but this can be violated in case of noise, such as sampling noise, thus,
+            # the adjustment is only done if NOT using the statevector simulation.
+            D, U = np.linalg.eig(mat)
+            mat = U @ np.diag(np.maximum(0, D)) @ U.transpose()
 
         return mat
 
@@ -486,3 +533,10 @@ class QSVM(QuantumAlgorithm):
             if not isinstance(datapoints, np.ndarray):
                 datapoints = np.asarray(datapoints)
             self.datapoints = datapoints
+
+
+def _assign_parameters(circuit, params):
+    if not hasattr(circuit, 'ordered_parameters'):
+        raise AttributeError('Circuit needs the attribute `ordered_parameters`.')
+    param_dict = dict(zip(circuit.ordered_parameters, params))
+    return circuit.assign_parameters(param_dict)

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This code is part of Qiskit.
 #
 # (C) Copyright IBM 2019, 2020.
@@ -14,13 +12,14 @@
 
 """ Test Vehicle Routing """
 
+import unittest
 from test.optimization import QiskitOptimizationTestCase
 
 import numpy as np
 from qiskit.quantum_info import Pauli
 from qiskit.aqua import aqua_globals
 from qiskit.aqua.algorithms import NumPyMinimumEigensolver
-from qiskit.optimization.ising.vehicle_routing import get_operator
+from qiskit.optimization.applications.ising.vehicle_routing import get_operator
 
 
 # To run only this test, issue:
@@ -63,4 +62,12 @@ class TestVehicleRouting(QiskitOptimizationTestCase):
         # Solve the problem using the exact eigensolver
         result = NumPyMinimumEigensolver(self.qubit_op).run()
         arr = np.array([0., 0., 0., 1.])
-        np.testing.assert_array_almost_equal(arr, result.eigenstate, 4)
+        np.testing.assert_array_almost_equal(arr, np.abs(result.eigenstate.to_matrix()) ** 2, 4)
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+
+if __name__ == '__main__':
+    unittest.main()

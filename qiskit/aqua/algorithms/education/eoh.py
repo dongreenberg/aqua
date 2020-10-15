@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This code is part of Qiskit.
 #
 # (C) Copyright IBM 2018, 2020.
@@ -17,10 +15,14 @@ The Quantum Dynamics algorithm.
 
 import logging
 
+from typing import Optional, Union, Dict, Any
 from qiskit import QuantumRegister
+from qiskit.providers import BaseBackend
+from qiskit.providers import Backend
+from qiskit.aqua import QuantumInstance
 from qiskit.aqua.algorithms import QuantumAlgorithm
-from qiskit.aqua.operators import op_converter
-from qiskit.aqua.operators import BaseOperator
+from qiskit.aqua.operators.legacy import op_converter
+from qiskit.aqua.operators import LegacyBaseOperator
 from qiskit.aqua.components.initial_states import InitialState
 from qiskit.aqua.utils.validation import validate_min, validate_in_set
 
@@ -39,13 +41,15 @@ class EOH(QuantumAlgorithm):
     via, for example, Lloyd’s method or Trotter-Suzuki decomposition.
     """
 
-    def __init__(self, operator: BaseOperator,
+    def __init__(self, operator: LegacyBaseOperator,
                  initial_state: InitialState,
-                 evo_operator: BaseOperator,
+                 evo_operator: LegacyBaseOperator,
                  evo_time: float = 1,
                  num_time_slices: int = 1,
                  expansion_mode: str = 'trotter',
-                 expansion_order: int = 1) -> None:
+                 expansion_order: int = 1,
+                 quantum_instance: Optional[
+                     Union[QuantumInstance, BaseBackend, Backend]] = None) -> None:
         """
         Args:
             operator: Operator to evaluate
@@ -56,12 +60,13 @@ class EOH(QuantumAlgorithm):
             expansion_mode: Either ``"trotter"`` (Lloyd's method) or ``"suzuki"``
                 (for Trotter-Suzuki expansion)
             expansion_order: The Trotter-Suzuki expansion order.
+            quantum_instance: Quantum Instance or Backend
         """
         validate_min('evo_time', evo_time, 0)
         validate_min('num_time_slices', num_time_slices, 1)
         validate_in_set('expansion_mode', expansion_mode, {'trotter', 'suzuki'})
         validate_min('expansion_order', expansion_order, 1)
-        super().__init__()
+        super().__init__(quantum_instance)
         self._operator = op_converter.to_weighted_pauli_operator(operator)
         self._initial_state = initial_state
         self._evo_operator = op_converter.to_weighted_pauli_operator(evo_operator)
@@ -69,7 +74,7 @@ class EOH(QuantumAlgorithm):
         self._num_time_slices = num_time_slices
         self._expansion_mode = expansion_mode
         self._expansion_order = expansion_order
-        self._ret = {}
+        self._ret = {}  # type: Dict[str, Any]
 
     def construct_circuit(self):
         """

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This code is part of Qiskit.
 #
 # (C) Copyright IBM 2020.
@@ -29,21 +27,10 @@ Applications
 
    MolecularGroundStateEnergy
 
-Application Results
-===================
-
-.. autosummary::
-   :toctree: ../stubs/
-   :nosignatures:
-
-   MolecularGroundStateEnergyResult
-
 """
 
-from .molecular_ground_state_energy import (MolecularGroundStateEnergy,
-                                            MolecularGroundStateEnergyResult)
+from .molecular_ground_state_energy import MolecularGroundStateEnergy
 
 __all__ = [
-    'MolecularGroundStateEnergy',
-    'MolecularGroundStateEnergyResult'
+    'MolecularGroundStateEnergy'
 ]

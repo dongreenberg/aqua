@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This code is part of Qiskit.
 #
 # (C) Copyright IBM 2018, 2020.
@@ -16,19 +14,20 @@
 An adaptive VQE implementation.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Union, Dict
 import logging
 import warnings
 import re
 import numpy as np
 
+from qiskit.providers import BaseBackend
+from qiskit.providers import Backend
 from qiskit import ClassicalRegister
-from qiskit.aqua import AquaError
+from qiskit.aqua import QuantumInstance, AquaError
 from qiskit.aqua.algorithms import VQAlgorithm, VQE, VQEResult
 from qiskit.chemistry.components.variational_forms import UCCSD
-from qiskit.aqua.operators import TPBGroupedWeightedPauliOperator, WeightedPauliOperator
-from qiskit.aqua.utils.backend_utils import is_aer_statevector_backend
-from qiskit.aqua.operators import BaseOperator
+from qiskit.aqua.operators import WeightedPauliOperator
+from qiskit.aqua.operators import LegacyBaseOperator
 from qiskit.aqua.components.optimizers import Optimizer
 from qiskit.aqua.components.variational_forms import VariationalForm
 from qiskit.aqua.utils.validation import validate_min
@@ -37,20 +36,23 @@ logger = logging.getLogger(__name__)
 
 
 class VQEAdapt(VQAlgorithm):
-    """
-    The Adaptive VQE algorithm.
+    """DEPRECATED. The Adaptive VQE algorithm.
 
     See https://arxiv.org/abs/1812.11173
     """
 
     # TODO make re-usable, implement MinimumEignesolver interface
-    def __init__(self, operator: BaseOperator,
+    def __init__(self, operator: LegacyBaseOperator,
                  var_form_base: VariationalForm, optimizer: Optimizer,
                  initial_point: Optional[np.ndarray] = None,
                  excitation_pool: Optional[List[WeightedPauliOperator]] = None,
                  threshold: float = 1e-5,
-                 delta: float = 1, max_evals_grouped: int = 1,
-                 aux_operators: Optional[List[BaseOperator]] = None) -> None:
+                 delta: float = 1,
+                 max_iterations: Optional[int] = None,
+                 max_evals_grouped: int = 1,
+                 aux_operators: Optional[List[LegacyBaseOperator]] = None,
+                 quantum_instance: Optional[
+                     Union[QuantumInstance, Backend, BaseBackend]] = None) -> None:
         """
         Args:
             operator: Qubit operator
@@ -61,21 +63,26 @@ class VQEAdapt(VQAlgorithm):
             threshold: absolute threshold value for gradients, has a min. value of 1e-15.
             delta: finite difference step size for gradient computation,
                     has a min. value of 1e-5.
+            max_iterations: maximum number of macro iterations of the VQEAdapt algorithm.
             max_evals_grouped: max number of evaluations performed simultaneously
-            aux_operators: Auxiliary operators to be evaluated
-                                                at each eigenvalue
+            aux_operators: Auxiliary operators to be evaluated at each eigenvalue
+            quantum_instance: Quantum Instance or Backend
 
         Raises:
             ValueError: if var_form_base is not an instance of UCCSD.
             See also: qiskit/chemistry/components/variational_forms/uccsd_adapt.py
         """
+        warnings.warn('The qiskit.chemistry.algorithms.minimum_eigen_solvers.VQEAdapt object is '
+                      'deprecated as of 0.8.0 and will be removed no sooner than 3 months after the'
+                      ' release. You should use qiskit.chemistry.algorithms.ground_state_solvers.'
+                      'AdaptVQE instead.', DeprecationWarning, stacklevel=2)
         validate_min('threshold', threshold, 1e-15)
         validate_min('delta', delta, 1e-5)
         super().__init__(var_form=var_form_base,
                          optimizer=optimizer,
-                         initial_point=initial_point)
-        self._use_simulator_snapshot_mode = None
-        self._ret = None
+                         initial_point=initial_point,
+                         quantum_instance=quantum_instance)
+        self._ret = None  # type: Dict
         self._optimizer.set_max_evals_grouped(max_evals_grouped)
         if initial_point is None:
             self._initial_point = var_form_base.preferred_init_points
@@ -88,6 +95,7 @@ class VQEAdapt(VQAlgorithm):
             if excitation_pool is None else excitation_pool
         self._threshold = threshold
         self._delta = delta
+        self._max_iterations = max_iterations
         self._aux_operators = []
         if aux_operators is not None:
             aux_operators = \
@@ -105,7 +113,7 @@ class VQEAdapt(VQAlgorithm):
             theta (list): list of (up to now) optimal parameters
             delta (float): finite difference step size (for gradient computation)
             var_form (VariationalForm): current variational form
-            operator (BaseOperator): system Hamiltonian
+            operator (LegacyBaseOperator): system Hamiltonian
             optimizer (Optimizer): classical optimizer algorithm
 
         Returns:
@@ -119,13 +127,11 @@ class VQEAdapt(VQAlgorithm):
             # construct auxiliary VQE instance
             vqe = VQE(operator, var_form, optimizer)
             vqe.quantum_instance = self.quantum_instance
-            vqe._operator = vqe._config_the_best_mode(operator, self.quantum_instance.backend)
-            vqe._use_simulator_snapshot_mode = self._use_simulator_snapshot_mode
             # evaluate energies
             parameter_sets = theta + [-delta] + theta + [delta]
             energy_results = vqe._energy_evaluation(np.asarray(parameter_sets))
             # compute gradient
-            gradient = (energy_results[0] - energy_results[1]) / (2*delta)
+            gradient = (energy_results[0] - energy_results[1]) / (2 * delta)
             res.append((np.abs(gradient), exc))
             # pop excitation from variational form
             var_form.pop_hopping_operator()
@@ -143,27 +149,18 @@ class VQEAdapt(VQAlgorithm):
             AquaError: wrong setting of operator and backend.
         """
         self._ret = {}  # TODO should be eliminated
-        self._operator = VQE._config_the_best_mode(self, self._operator,
-                                                   self._quantum_instance.backend)
-        self._use_simulator_snapshot_mode = \
-            is_aer_statevector_backend(self._quantum_instance.backend) \
-            and isinstance(self._operator, (WeightedPauliOperator, TPBGroupedWeightedPauliOperator))
+        # self._operator = VQE._config_the_best_mode(self, self._operator,
+        #                                            self._quantum_instance.backend)
         self._quantum_instance.circuit_summary = True
-
-        cycle_regex = re.compile(r'(.+)( \1)+')
-        # reg-ex explanation:
-        # 1. (.+) will match at least one number and try to match as many as possible
-        # 2. the match of this part is placed into capture group 1
-        # 3. ( \1)+ will match a space followed by the contents of capture group 1
-        # -> this results in any number of repeating numbers being detected
 
         threshold_satisfied = False
         alternating_sequence = False
+        max_iterations_exceeded = False
         prev_op_indices = []
-        theta = []
-        max_grad = ()
+        theta = []  # type: List
+        max_grad = (0, 0)
         iteration = 0
-        while not threshold_satisfied and not alternating_sequence:
+        while self._max_iterations is None or iteration < self._max_iterations:
             iteration += 1
             logger.info('--- Iteration #%s ---', str(iteration))
             # compute gradients
@@ -189,7 +186,7 @@ class VQEAdapt(VQAlgorithm):
                 threshold_satisfied = True
                 break
             # check indices of picked gradients for cycles
-            if cycle_regex.search(' '.join(map(str, prev_op_indices))) is not None:
+            if VQEAdapt._check_cyclicity(prev_op_indices):
                 logger.info("Alternating sequence found. Finishing.")
                 logger.info("Final maximum gradient: %s", str(np.abs(max_grad[0])))
                 alternating_sequence = True
@@ -203,6 +200,12 @@ class VQEAdapt(VQAlgorithm):
             vqe_result = algorithm.run(self._quantum_instance)
             self._ret['opt_params'] = vqe_result.optimal_point
             theta = vqe_result.optimal_point.tolist()
+        else:
+            # reached maximum number of iterations
+            max_iterations_exceeded = True
+            logger.info("Maximum number of iterations reached. Finishing.")
+            logger.info("Final maximum gradient: %s", str(np.abs(max_grad[0])))
+
         # once finished evaluate auxiliary operators if any
         if self._aux_operators is not None and self._aux_operators:
             algorithm = VQE(self._operator, self._var_form_base, self._optimizer,
@@ -214,6 +217,8 @@ class VQEAdapt(VQAlgorithm):
             finishing_criterion = 'Threshold converged'
         elif alternating_sequence:
             finishing_criterion = 'Aborted due to cyclicity'
+        elif max_iterations_exceeded:
+            finishing_criterion = 'Maximum number of iterations reached'
         else:
             raise AquaError('The algorithm finished due to an unforeseen reason!')
 
@@ -226,6 +231,30 @@ class VQEAdapt(VQAlgorithm):
 
         logger.info('The final energy is: %s', str(result.optimal_value.real))
         return result
+
+    @staticmethod
+    def _check_cyclicity(indices: List) -> bool:
+        """
+        Auxiliary function to check for cycles in the indices of the selected excitations.
+
+        Returns:
+            bool: Whether repeating sequences of indices have been detected.
+        """
+        cycle_regex = re.compile(r"(\b.+ .+\b)( \b\1\b)+")
+        # reg-ex explanation:
+        # 1. (\b.+ .+\b) will match at least two numbers and try to match as many as possible. The
+        #    word boundaries in the beginning and end ensure that now numbers are split into digits.
+        # 2. the match of this part is placed into capture group 1
+        # 3. ( \b\1\b)+ will match a space followed by the contents of capture group 1 (again
+        #    delimited by word boundaries to avoid separation into digits).
+        # -> this results in any sequence of at least two numbers being detected
+        match = cycle_regex.search(' '.join(map(str, indices)))
+        logger.debug('Cycle detected: %s', match)
+        # Additionally we also need to check whether the last two numbers are identical, because the
+        # reg-ex above will only find cycles of at least two consecutive numbers.
+        # It is sufficient to assert that the last two numbers are different due to the iterative
+        # nature of the algorithm.
+        return match is not None or (len(indices) > 1 and indices[-2] == indices[-1])
 
     def get_optimal_cost(self):
         if 'opt_params' not in self._ret:

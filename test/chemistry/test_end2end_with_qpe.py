@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This code is part of Qiskit.
 #
 # (C) Copyright IBM 2018, 2020.
@@ -17,12 +15,12 @@
 import unittest
 from test.chemistry import QiskitChemistryTestCase
 import numpy as np
-from ddt import ddt, idata, unpack
+from ddt import ddt, data
 import qiskit
+from qiskit.circuit.library import QFT
 from qiskit.aqua.utils import decimal_to_binary
 from qiskit.aqua import QuantumInstance
-from qiskit.aqua.algorithms import QPEMinimumEigensolver, NumPyMinimumEigensolver
-from qiskit.aqua.components.iqfts import Standard
+from qiskit.aqua.algorithms import QPE, NumPyMinimumEigensolver
 from qiskit.aqua.operators import Z2Symmetries
 from qiskit.chemistry.drivers import PySCFDriver, UnitsType
 from qiskit.chemistry import FermionicOperator, QiskitChemistryError
@@ -33,12 +31,7 @@ from qiskit.chemistry.components.initial_states import HartreeFock
 class TestEnd2EndWithQPE(QiskitChemistryTestCase):
     """QPE tests."""
 
-    @idata([
-        [0.5],
-        [0.735],
-        [1],
-    ])
-    @unpack
+    @data(0.5, 0.735, 1)
     def test_qpe(self, distance):
         """ qpe test """
         self.log.debug('Testing End-to-End with QPE on '
@@ -71,13 +64,12 @@ class TestEnd2EndWithQPE(QiskitChemistryTestCase):
         num_time_slices = 1
         n_ancillae = 6
 
-        state_in = HartreeFock(qubit_op.num_qubits, num_orbitals,
-                               num_particles, qubit_mapping, two_qubit_reduction)
-        iqft = Standard(n_ancillae)
+        state_in = HartreeFock(num_orbitals, num_particles, qubit_mapping, two_qubit_reduction)
+        iqft = QFT(n_ancillae).inverse()
 
-        qpe = QPEMinimumEigensolver(qubit_op, state_in, iqft, num_time_slices, n_ancillae,
-                                    expansion_mode='suzuki',
-                                    expansion_order=2, shallow_circuit_concat=True)
+        qpe = QPE(qubit_op, state_in, iqft, num_time_slices, n_ancillae,
+                  expansion_mode='suzuki',
+                  expansion_order=2, shallow_circuit_concat=True)
         backend = qiskit.BasicAer.get_backend('qasm_simulator')
         quantum_instance = QuantumInstance(backend, shots=100)
         result = qpe.run(quantum_instance)

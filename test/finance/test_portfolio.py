@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This code is part of Qiskit.
 #
 # (C) Copyright IBM 2020.
@@ -14,6 +12,7 @@
 
 """ Test Portfolio """
 
+import unittest
 from test.finance import QiskitFinanceTestCase
 
 import datetime
@@ -24,9 +23,9 @@ from qiskit import BasicAer
 from qiskit.aqua import aqua_globals, QuantumInstance
 from qiskit.aqua.algorithms import NumPyMinimumEigensolver, QAOA
 from qiskit.aqua.components.optimizers import COBYLA
-from qiskit.finance.ising import portfolio
+from qiskit.finance.applications.ising import portfolio
 from qiskit.finance.data_providers import RandomDataProvider
-from qiskit.optimization.ising.common import sample_most_likely
+from qiskit.optimization.applications.ising.common import sample_most_likely
 
 
 class TestPortfolio(QiskitFinanceTestCase):
@@ -34,7 +33,7 @@ class TestPortfolio(QiskitFinanceTestCase):
 
     def setUp(self):
         super().setUp()
-        self.seed = 45764
+        self.seed = 50
         aqua_globals.random_seed = self.seed
 
         num_assets = 4
@@ -60,8 +59,8 @@ class TestPortfolio(QiskitFinanceTestCase):
         selection = sample_most_likely(result.eigenstate)
         value = portfolio.portfolio_value(
             selection, self.muu, self.sigma, self.risk, self.budget, self.penalty)
-        np.testing.assert_array_equal(selection, [1, 0, 0, 1])
-        self.assertAlmostEqual(value, -0.0055989)
+        np.testing.assert_array_equal(selection, [0, 1, 1, 0])
+        self.assertAlmostEqual(value, -0.00679917)
 
     def test_portfolio_qaoa(self):
         """ portfolio test with QAOA """
@@ -75,5 +74,9 @@ class TestPortfolio(QiskitFinanceTestCase):
         selection = sample_most_likely(result.eigenstate)
         value = portfolio.portfolio_value(
             selection, self.muu, self.sigma, self.risk, self.budget, self.penalty)
-        np.testing.assert_array_equal(selection, [1, 0, 0, 1])
-        self.assertAlmostEqual(value, -0.0055989)
+        np.testing.assert_array_equal(selection, [0, 1, 1, 0])
+        self.assertAlmostEqual(value, -0.00679917)
+
+
+if __name__ == '__main__':
+    unittest.main()

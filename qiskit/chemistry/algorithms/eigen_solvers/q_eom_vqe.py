@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This code is part of Qiskit.
 #
 # (C) Copyright IBM 2019, 2020.
@@ -18,8 +16,12 @@ import logging
 
 from typing import Union, List, Optional, Callable
 import numpy as np
+from qiskit.circuit import QuantumCircuit
+from qiskit.providers import BaseBackend
+from qiskit.providers import Backend
+from qiskit.aqua import QuantumInstance
 from qiskit.aqua.algorithms import VQE
-from qiskit.aqua.operators import BaseOperator, Z2Symmetries
+from qiskit.aqua.operators import LegacyBaseOperator, Z2Symmetries
 from qiskit.aqua.components.optimizers import Optimizer
 from qiskit.aqua.components.variational_forms import VariationalForm
 from qiskit.aqua.utils.validation import validate_min, validate_in_set
@@ -31,13 +33,13 @@ logger = logging.getLogger(__name__)
 class QEomVQE(VQE):
     """ QEomVQE algorithm """
 
-    def __init__(self, operator: BaseOperator, var_form: VariationalForm,
+    def __init__(self, operator: LegacyBaseOperator,
+                 var_form: Union[QuantumCircuit, VariationalForm],
                  optimizer: Optimizer, num_orbitals: int,
                  num_particles: Union[List[int], int],
                  initial_point: Optional[np.ndarray] = None,
                  max_evals_grouped: int = 1,
                  callback: Optional[Callable[[int, np.ndarray, float, float], None]] = None,
-                 auto_conversion: bool = True,
                  qubit_mapping: str = 'parity',
                  two_qubit_reduction: bool = True,
                  is_eom_matrix_symmetric: bool = True,
@@ -46,8 +48,10 @@ class QEomVQE(VQE):
                  se_list: Optional[List[List[int]]] = None,
                  de_list: Optional[List[List[int]]] = None,
                  z2_symmetries: Optional[Z2Symmetries] = None,
-                 untapered_op: Optional[BaseOperator] = None,
-                 aux_operators: Optional[List[BaseOperator]] = None) -> None:
+                 untapered_op: Optional[LegacyBaseOperator] = None,
+                 aux_operators: Optional[List[LegacyBaseOperator]] = None,
+                 quantum_instance: Optional[
+                     Union[QuantumInstance, Backend, BaseBackend]] = None) -> None:
         """
         Args:
             operator: qubit operator
@@ -64,13 +68,6 @@ class QEomVQE(VQE):
                                  Internally, four arguments are provided as follows
                                  the index of evaluation, parameters of variational form,
                                  evaluated mean, evaluated standard deviation.
-            auto_conversion: an automatic conversion for operator and aux_operators into
-                                    the type which is most suitable for the backend.
-
-                                    - non-aer statevector_simulator: MatrixOperator
-                                    - aer statevector_simulator: WeightedPauliOperator
-                                    - qasm simulator or real backend:
-                                        TPBGroupedWeightedPauliOperator
             qubit_mapping: qubit mapping type
             two_qubit_reduction: two qubit reduction is applied or not
             is_eom_matrix_symmetric: is EoM matrix symmetric
@@ -83,8 +80,8 @@ class QEomVQE(VQE):
             z2_symmetries: represent the Z2 symmetries
             untapered_op: if the operator is tapered, we need untapered operator
                                          during building element of EoM matrix
-            aux_operators: Auxiliary operators to be
-                                                evaluated at each eigenvalue
+            aux_operators: Auxiliary operators to be evaluated at each eigenvalue
+            quantum_instance: Quantum Instance or Backend
         Raises:
             ValueError: invalid parameter
         """
@@ -96,7 +93,8 @@ class QEomVQE(VQE):
                 num_particles))
         super().__init__(operator.copy(), var_form, optimizer, initial_point=initial_point,
                          max_evals_grouped=max_evals_grouped, aux_operators=aux_operators,
-                         callback=callback, auto_conversion=auto_conversion)
+                         callback=callback,
+                         quantum_instance=quantum_instance)
 
         self.qeom = QEquationOfMotion(operator, num_orbitals, num_particles,
                                       qubit_mapping, two_qubit_reduction, active_occupied,
@@ -109,7 +107,7 @@ class QEomVQE(VQE):
         self._quantum_instance.circuit_summary = True
         opt_params = self._ret['opt_params']
         logger.info("opt params:\n%s", opt_params)
-        wave_fn = self._var_form.construct_circuit(opt_params)
+        wave_fn = self.get_optimal_circuit()
         excitation_energies_gap, eom_matrices = self.qeom.calculate_excited_states(
             wave_fn, quantum_instance=self._quantum_instance)
         excitation_energies = excitation_energies_gap + self._ret['energy']

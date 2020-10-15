@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This code is part of Qiskit.
 #
 # (C) Copyright IBM 2018, 2020.
@@ -27,16 +25,14 @@ logger = logging.getLogger(__name__)
 class HartreeFock(InitialState):
     """A Hartree-Fock initial state."""
 
-    def __init__(self, num_qubits: int,
+    def __init__(self,
                  num_orbitals: int,
                  num_particles: Union[List[int], int],
                  qubit_mapping: str = 'parity',
                  two_qubit_reduction: bool = True,
                  sq_list: Optional[List[int]] = None) -> None:
-        """Constructor.
-
+        """
         Args:
-            num_qubits: number of qubits, has a min. value of 1.
             num_orbitals: number of spin orbitals, has a min. value of 1.
             num_particles: number of particles, if it is a list, the first number
                             is alpha and the second number if beta.
@@ -49,7 +45,6 @@ class HartreeFock(InitialState):
             ValueError: wrong setting in num_particles and num_orbitals.
             ValueError: wrong setting for computed num_qubits and supplied num_qubits.
         """
-        validate_min('num_qubits', num_qubits, 1)
         validate_min('num_orbitals', num_orbitals, 1)
         if isinstance(num_particles, list) and len(num_particles) != 2:
             raise ValueError('Num particles value {}. Number of values allowed is 2'.format(
@@ -85,9 +80,6 @@ class HartreeFock(InitialState):
         self._num_qubits = num_orbitals - 2 if self._two_qubit_reduction else self._num_orbitals
         self._num_qubits = self._num_qubits \
             if not self._qubit_tapering else self._num_qubits - len(sq_list)
-        if self._num_qubits != num_qubits:
-            raise ValueError("Computed num qubits {} does not match "
-                             "actual {}".format(self._num_qubits, num_qubits))
 
         self._bitstr = None
 
@@ -156,7 +148,7 @@ class HartreeFock(InitialState):
             quantum_circuit = QuantumCircuit(register)
             for qubit_idx, bit in enumerate(self._bitstr[::-1]):
                 if bit:
-                    quantum_circuit.u3(np.pi, 0.0, np.pi, register[qubit_idx])
+                    quantum_circuit.x(register[qubit_idx])
             return quantum_circuit
         else:
             raise ValueError('Mode should be either "vector" or "circuit"')

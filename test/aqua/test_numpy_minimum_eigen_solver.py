@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # This code is part of Qiskit.
 #
 # (C) Copyright IBM 2020.
@@ -24,6 +22,7 @@ from qiskit.aqua.operators import WeightedPauliOperator
 
 class TestNumPyMinimumEigensolver(QiskitAquaTestCase):
     """ Test NumPy Minimum Eigensolver """
+
     def setUp(self):
         super().setUp()
         pauli_dict = {
@@ -70,7 +69,7 @@ class TestNumPyMinimumEigensolver(QiskitAquaTestCase):
         algo = NumPyMinimumEigensolver()
         result = algo.compute_minimum_eigenvalue(self.qubit_op)
         self.assertAlmostEqual(result.eigenvalue, -1.85727503 + 0j)
-        self.assertEqual(self.qubit_op, algo.operator)
+        self.assertEqual(self.qubit_op.to_opflow(), algo.operator)
         self.assertIsNone(result.aux_operator_eigenvalues)
 
         # Set operator to None and go again
@@ -103,12 +102,43 @@ class TestNumPyMinimumEigensolver(QiskitAquaTestCase):
         self.assertEqual(len(result.aux_operator_eigenvalues), 2)
         np.testing.assert_array_almost_equal(result.aux_operator_eigenvalues[0], [2, 0])
         np.testing.assert_array_almost_equal(result.aux_operator_eigenvalues[1], [0, 0])
-        np.testing.assert_array_equal(self.aux_ops, algo.aux_operators)
 
         # Finally just set one of aux_operators and main operator, remove aux_operators
         result = algo.compute_minimum_eigenvalue(self.aux_ops[0], [])
         self.assertAlmostEqual(result.eigenvalue, 2 + 0j)
         self.assertIsNone(result.aux_operator_eigenvalues)
+
+    def test_cme_filter(self):
+        """ Basic test """
+
+        # define filter criterion
+        # pylint: disable=unused-argument
+        def criterion(x, v, a_v):
+            return v >= -0.5
+
+        algo = NumPyMinimumEigensolver(
+            self.qubit_op, aux_operators=self.aux_ops, filter_criterion=criterion)
+
+        result = algo.run()
+        self.assertAlmostEqual(result.eigenvalue, -0.22491125 + 0j)
+        self.assertEqual(len(result.aux_operator_eigenvalues), 2)
+        np.testing.assert_array_almost_equal(result.aux_operator_eigenvalues[0], [2, 0])
+        np.testing.assert_array_almost_equal(result.aux_operator_eigenvalues[1], [0, 0])
+
+    def test_cme_filter_empty(self):
+        """ Test with filter always returning False """
+
+        # define filter criterion
+        # pylint: disable=unused-argument
+        def criterion(x, v, a_v):
+            return False
+
+        algo = NumPyMinimumEigensolver(
+            self.qubit_op, aux_operators=self.aux_ops, filter_criterion=criterion)
+        result = algo.run()
+        self.assertEqual(result.eigenvalue, None)
+        self.assertEqual(result.eigenstate, None)
+        self.assertEqual(result.aux_operator_eigenvalues, None)
 
 
 if __name__ == '__main__':
